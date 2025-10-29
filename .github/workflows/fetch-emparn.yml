@@ -1,4 +1,3 @@
-# .github/workflows/fetch-emparn.yml
 name: Fetch EMPARN Twice Daily
 
 on:
@@ -14,15 +13,26 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Install Playwright + PapaParse
+
+      - name: Install Playwright + PapaParse (com browsers)
         run: |
           npm init -y
           npm i playwright papaparse
+          npx playwright install --with-deps chromium
+
+      - name: (debug) Mostrar árvore do repo
+        run: |
+          pwd
+          ls -lah
+          ls -lah scripts || true
+
       - name: Run scraper
-        run: node scripts/fetch-emparn-playwright.cjs
+        run: node scripts/fetch-emparn-playwright.js
+
       - name: Timestamp snapshot (UTC-3) + keep latest.*
         shell: bash
         run: |
@@ -34,6 +44,8 @@ jobs:
               cp "data/latest.$ext" "data/${TSTAMP}.$ext"
             fi
           done
+          ls -lh data | sed -n '1,200p'
+
       - name: Commit
         run: |
           git config user.name "pluvio-bot"
