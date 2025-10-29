@@ -2,26 +2,19 @@ name: Fetch EMPARN Daily
 
 on:
   schedule:
-    # 09:15 BRT = 12:15 UTC
-    - cron: '15 12 * * *'
-  workflow_dispatch: {}   # permite rodar manualmente
+    - cron: '15 12 * * *'   # 09:15 BRT
+  workflow_dispatch: {}      # botão "Run workflow"
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write        # necessário para commitar
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install deps
-        run: npm i node-fetch@3 cheerio@1
-
-      - name: Fetch CSV/TXT from EMPARN
-        run: node scripts/fetch-emparn.js
+      - name: Run scraper (CSV -> TXT fallback)
+        run: node scripts/fetch-emparn.cjs
 
       - name: Commit files
         run: |
