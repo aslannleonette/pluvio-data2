@@ -1,5 +1,4 @@
 // scripts/fetch-emparn-playwright.js
-// Coleta o boletim diário da EMPARN. Tenta CSV/TXT; fallback: raspa as 4 abas.
 const fs = require("fs");
 const { chromium } = require("playwright");
 const Papa = require("papaparse");
@@ -18,12 +17,11 @@ async function gotoWithRetry(page, url, tries = 3) {
   for (let i = 1; i <= tries; i++) {
     try {
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 180000 });
-      // Aguarda elemento-chave do boletim (primeira aba)
       await page.waitForSelector('a#agreste_potiguar', { timeout: 180000 });
       return;
     } catch (err) {
       lastErr = err;
-      const backoff = 15000 * i; // 15s, 30s, 45s
+      const backoff = 15000 * i;
       console.warn(`goto tentativa ${i}/${tries} falhou: ${err.message}. Retentando em ${backoff/1000}s...`);
       await new Promise(r => setTimeout(r, backoff));
     }
@@ -38,7 +36,6 @@ async function httpGet(u) {
 }
 
 async function maybeDownloadByButtons(page) {
-  // olha <a> e <button> com possíveis href/onclick para CSV/TXT
   const els = await page.$$eval("a,button", es =>
     es.map(el => ({
       text: (el.textContent||"").trim(),
@@ -99,28 +96,22 @@ async function extractTableFromContainer(page, containerSelector, regiao) {
 }
 
 (async () => {
-  ensureDir("data");
+  fs.mkdirSync("data", { recursive: true });
 
-  // Chromium com flags estáveis pro Actions
   const browser = await chromium.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-dev-shm-usage"]
   });
-  const ctx = await browser.newContext({
-    userAgent: UA,
-    javaScriptEnabled: true
-  });
+  const ctx = await browser.newContext({ userAgent: UA, javaScriptEnabled: true });
   const page = await ctx.newPage();
-  page.setDefaultTimeout(180000); // 3 min p/ ações
+  page.setDefaultTimeout(180000);
 
   console.log(">> Acessando:", URL);
   await gotoWithRetry(page, URL, 3);
 
-  // 1) tenta export oficial (CSV/TXT)
   const viaExport = await maybeDownloadByButtons(page);
   if (viaExport) console.log(`OK via export: ${viaExport}`);
 
-  // 2) raspagem por abas
   const abas = [
     { id: "agreste_potiguar", label: "Agreste Potiguar" },
     { id: "central_potiguar", label: "Central Potiguar" },
@@ -132,8 +123,6 @@ async function extractTableFromContainer(page, containerSelector, regiao) {
   for (const a of abas) {
     const linkSel = `a#${a.id}`;
     const contentSel = `#${a.id}-content`;
-
-    // Clica na aba e espera a tabela da região
     if (await page.$(linkSel)) await page.click(linkSel, { timeout: 60000 });
     const rows = await extractTableFromContainer(page, contentSel, a.label).catch(e => {
       console.warn(`!! Falha ao ler ${a.label}: ${e.message}`);
@@ -149,7 +138,6 @@ async function extractTableFromContainer(page, containerSelector, regiao) {
     saveText("data/latest.csv", csv);
     console.log(`OK por DOM: ${all.length} linhas -> data/latest.csv & data/latest.json`);
   } else if (!viaExport) {
-    // salva DOM para debug
     saveText("data/rendered.html", await page.content());
     throw new Error("Nenhuma linha encontrada e sem export. HTML salvo em data/rendered.html");
   }
