@@ -2,7 +2,7 @@ name: Fetch EMPARN Daily
 
 on:
   schedule:
-    - cron: '15 12 * * *'   # 09:15 BRT (UTC-3)
+    - cron: '15 12 * * *'    # 09:15 BRT (UTC-3)
   workflow_dispatch: {}
 
 jobs:
@@ -13,65 +13,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Scrape boletim (CSV -> TXT fallback) com curl/grep
-        shell: bash
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
         run: |
-          set -euo pipefail
-          BASE="https://meteorologia.emparn.rn.gov.br"
-          URL="$BASE/boletim/diario"
-          UA="PluvioRN-Bot/1.0 (+github actions)"
-          mkdir -p data
+          npm init -y
+          npm i playwright
 
-          echo ">> Baixando HTML do boletim..."
-          curl -A "$UA" -sSL "$URL" -o data/page.html
+      - name: Run scraper (Chromium headless)
+        run: node scripts/fetch-emparn-playwright.cjs
 
-          echo ">> Procurando link CSV..."
-          CSV_REL=$(grep -oiE 'href="([^"]+\.csv[^"]*)"' data/page.html | head -n1 | sed -E 's/.*href="([^"]+)".*/\1/')
-          echo "CSV_REL=$CSV_REL"
-
-          if [ -n "${CSV_REL:-}" ]; then
-            if [[ "$CSV_REL" =~ ^https?:// ]]; then
-              CSV_URL="$CSV_REL"
-            else
-              CSV_URL="$BASE$CSV_REL"
-            fi
-            echo ">> Baixando CSV: $CSV_URL"
-            curl -A "$UA" -e "$URL" -sSL "$CSV_URL" -o data/latest.csv || true
-          fi
-
-          if [ ! -s data/latest.csv ]; then
-            echo ">> CSV não disponível. Procurando TXT..."
-            TXT_REL=$(grep -oiE 'href="([^"]+\.txt[^"]*)"' data/page.html | head -n1 | sed -E 's/.*href="([^"]+)".*/\1/')
-            echo "TXT_REL=$TXT_REL"
-
-            if [ -n "${TXT_REL:-}" ]; then
-              if [[ "$TXT_REL" =~ ^https?:// ]]; then
-                TXT_URL="$TXT_REL"
-              else
-                TXT_URL="$BASE$TXT_REL"
-              fi
-              echo ">> Baixando TXT: $TXT_URL"
-              curl -A "$UA" -e "$URL" -sSL "$TXT_URL" -o data/latest.txt || true
-            fi
-          fi
-
-          if [ -s data/latest.csv ]; then
-            echo "OK: data/latest.csv gravado."
-          elif [ -s data/latest.txt ]; then
-            echo "OK: data/latest.txt gravado."
-          else
-            echo "ERRO: não encontrei CSV nem TXT no HTML do boletim."
-            # Mostra primeiras linhas do HTML para inspeção rápida nos logs
-            head -n 50 data/page.html || true
-            exit 1
-          fi
-
-      - name: Anexar HTML do boletim (debug)
+      - name: Upload artifacts (debug)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: emparn-boletim-html
-          path: data/page.html
+          name: emparn-rendered
+          path: |
+            data/rendered.html
+            data/links.txt
 
       - name: Commit files
         run: |
