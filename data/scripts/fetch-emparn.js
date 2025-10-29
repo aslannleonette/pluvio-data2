@@ -1,5 +1,4 @@
-// Busca o Boletim Diário da EMPARN, tenta CSV; se falhar, usa TXT.
-// Salva em data/latest.csv (ou latest.txt) e também arquiva por data.
+// Busca o boletim diário da EMPARN e salva CSV (fallback TXT) em /data
 import fetch from "node-fetch";
 import * as cheerio from "cheerio";
 import { writeFileSync, mkdirSync } from "fs";
@@ -7,95 +6,60 @@ import { writeFileSync, mkdirSync } from "fs";
 const BASE = "https://meteorologia.emparn.rn.gov.br";
 const URL  = `${BASE}/boletim/diario`;
 
-// Data (BRT/UTC-3) para nome de arquivo
-function todayBRTISO() {
-  const now = new Date();
-  const utc = new Date(now.getTime() + now.getTimezoneOffset() * 60000);
-  const brt = new Date(utc.getTime() - 3 * 3600 * 1000);
-  const y = brt.getFullYear();
-  const m = String(brt.getMonth() + 1).padStart(2, "0");
-  const d = String(brt.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+async function getHtml(u) {
+  const r = await fetch(u, { headers: { "User-Agent": "PluvioRN-Bot/1.0" }});
+  if (!r.ok) throw new Error(`HTTP ${r.status} @ ${u}`);
+  return r.text();
+}
+
+function abs(href) {
+  if (!href) return null;
+  return href.startsWith("http") ? href : BASE + href;
 }
 
 async function main() {
-  const res = await fetch(URL, { headers: { "User-Agent": "PluvioRN-Bot" } });
-  if (!res.ok) throw new Error(`Falha ao abrir o boletim: HTTP ${res.status}`);
-  const html = await res.text();
+  const html = await getHtml(URL);
   const $ = cheerio.load(html);
 
-  // Procura primeiro CSV, depois TXT (links podem ser relativos)
-  const pick = (sel) => {
-    let href = $(sel).first().attr("href");
-    if (!href) return null;
-    if (!href.startsWith("http")) href = BASE + href;
-    return href;
-  };
+  // 1) Tente link(s) CSV do boletim do dia
+  const csvLink = $('a[href*=".csv"], a[href*=".CSV"]').first().attr("href");
+  const txtLink = $('a[href*=".txt"], a[href*=".TXT"]').first().attr("href");
 
-  let csvHref = pick('a[href*=".csv"], a[href*=".CSV"]');
-  let txtHref = pick('a[href*=".txt"], a[href*=".TXT"]');
+  let savedCsv = false, savedTxt = false;
+  mkdirSync("data", { recursive: true });
 
-  mkdirSync("data/archive", { recursive: true });
-
-  const stamp = todayBRTISO();
-
-  if (csvHref) {
-    const r = await fetch(csvHref, { headers: { "User-Agent": "PluvioRN-Bot" } });
-    if (!r.ok) throw new Error(`CSV indisponível: HTTP ${r.status}`);
-    const content = await r.text();
-    writeFileSync("data/latest.csv", content, "utf8");
-    writeFileSync(`data/archive/${stamp}.csv`, content, "utf8");
-    console.log(`OK: CSV salvo em data/latest.csv e data/archive/${stamp}.csv`);
-    return;
+  if (csvLink) {
+    const u = abs(csvLink);
+    try {
+      const r = await fetch(u, { headers: { "User-Agent": "PluvioRN-Bot/1.0" }});
+      if (r.ok) {
+        const text = await r.text();
+        writeFileSync("data/latest.csv", text, "utf8");
+        savedCsv = true;
+        console.log("OK: data/latest.csv");
+      }
+    } catch (e) {
+      console.warn("Falha CSV:", e.message);
+    }
   }
 
-  if (txtHref) {
-    const r = await fetch(txtHref, { headers: { "User-Agent": "PluvioRN-Bot" } });
-    if (!r.ok) throw new Error(`TXT indisponível: HTTP ${r.status}`);
-    const content = await r.text();
-    writeFileSync("data/latest.txt", content, "utf8");
-    writeFileSync(`data/archive/${stamp}.txt`, content, "utf8");
-    console.log(`OK: TXT salvo em data/latest.txt e data/archive/${stamp}.txt`);
-    return;
+  // 2) Fallback para TXT
+  if (!savedCsv && txtLink) {
+    const u = abs(txtLink);
+    const r = await fetch(u, { headers: { "User-Agent": "PluvioRN-Bot/1.0" }});
+    if (!r.ok) throw new Error("TXT link indisponível");
+    const text = await r.text();
+    writeFileSync("data/latest.txt", text, "utf8");
+    savedTxt = true;
+    console.log("OK: data/latest.txt");
   }
 
-  throw new Error("Não encontrei links para CSV nem TXT no boletim de hoje.");
+  if (!savedCsv && !savedTxt) {
+    throw new Error("Não encontrei CSV nem TXT do boletim.");
+  }
 }
 
-main().catch((e) => {
-  console.error("ERRO:", e.message || e);
+main().catch(err => {
+  console.error("ERRO:", err.message);
   process.exit(1);
 });
-name: Fetch EMPARN Daily
-
-on:
-  schedule:
-    # 12:15 UTC ~ 09:15 BRT (ajuste se quiser outro horário)
-    - cron: '15 12 * * *'
-  workflow_dispatch: {}
-
-jobs:
-  fetch:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install deps
-        run: npm i node-fetch@3 cheerio@1
-
-      - name: Fetch CSV/TXT from EMPARN
-        run: node scripts/fetch-emparn.js
-
-      - name: Commit data
-        run: |
-          git config user.name "pluvio-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add data/latest.* data/archive/*
-          git commit -m "chore: update EMPARN daily data" || echo "No changes to commit"
-          git push
-
