@@ -2,13 +2,13 @@ name: Fetch EMPARN Twice Daily
 
 on:
   schedule:
-    # Horários em UTC (equivalem a 09:15 e 18:15 em America/Fortaleza / UTC-3)
+    # UTC -> 12:15 e 21:15 (equivalem a 09:15 e 18:15 em America/Fortaleza)
     - cron: '15 12 * * *'
     - cron: '15 21 * * *'
   workflow_dispatch: {}  # permite rodar manualmente
 
 permissions:
-  contents: write  # necessário para commit/push
+  contents: write
 
 concurrency:
   group: emparn-fetch
@@ -40,7 +40,14 @@ jobs:
         run: |
           pwd
           ls -lah
+          echo "---- scripts dir ----"
           ls -lah scripts || true
+
+      - name: (debug) Show script head
+        run: |
+          echo "---- scripts/fetch-emparn-playwright.js (first 120 lines) ----"
+          sed -n '1,120p' scripts/fetch-emparn-playwright.js || true
+          echo "-----------------------------------------------------------"
 
       - name: Run scraper
         run: node scripts/fetch-emparn-playwright.js
@@ -56,7 +63,8 @@ jobs:
               cp "data/latest.$ext" "data/${TSTAMP}.$ext"
             fi
           done
-          ls -lh data | sed -n '1,200p'
+          echo "---- data/ listing ----"
+          ls -lh data | sed -n '1,200p' || true
 
       - name: Commit & Push
         run: |
